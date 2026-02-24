@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  npm-unifi-sync:
+    build: .
+    container_name: npm-unifi-sync
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./npm_unifi_state.json:/app/npm_unifi_state.json
+    network_mode: bridge
