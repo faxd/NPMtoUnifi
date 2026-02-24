@@ -1,0 +1,17 @@
+# Environment variables (contains secrets)
+.env
+
+# State file (contains your DNS record tracking)
+npm_unifi_state.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
