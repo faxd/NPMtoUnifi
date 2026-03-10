@@ -242,27 +242,25 @@ def unifi_create_record(site_id, domain, ip_address):
 
 # --- UniFi: Update a DNS policy ---
 def unifi_update_record(site_id, policy_id, domain, ip_address):
-    payload = {
-        "type": "A_RECORD",
-        "enabled": True,
-        "domain": domain,
-        "ipv4Address": ip_address,
-        "ttlSeconds": 300  # 5 minutes TTL
-    }
-    logger.debug(f"Updating DNS policy with payload: {payload}")
+    """
+    Update a DNS policy by deleting the old record and creating a new one.
+    UniFi API doesn't support PATCH for DNS policies, so we use delete+create.
+    """
+    logger.debug(f"Updating DNS policy: {domain} -> {ip_address} (delete + create)")
 
-    url = f"{UNIFI_BASE}/proxy/network/integration/v1/sites/{site_id}/dns/policies/{policy_id}"
-    r = requests.patch(url, headers=unifi_get_headers(), json=payload, verify=False)
+    # Step 1: Delete the old record
+    if not unifi_delete_record(site_id, policy_id, domain):
+        logger.error(f"Failed to delete old record for {domain}, cannot update")
+        return None
 
-    logger.debug(f"Update DNS policy response status: {r.status_code}")
-    logger.debug(f"Update DNS policy response body: {r.text}")
-
-    if r.status_code == 200:
+    # Step 2: Create the new record with updated IP
+    result = unifi_create_record(site_id, domain, ip_address)
+    if result:
         logger.info(f"✓ Successfully updated DNS policy: {domain} -> {ip_address}")
-        return True
+        return result
     else:
-        logger.error(f"✗ Failed to update DNS policy {domain}: {r.status_code} - {r.text}")
-        return False
+        logger.error(f"✗ Failed to create new record for {domain} during update")
+        return None
 
 # --- UniFi: Delete a DNS policy ---
 def unifi_delete_record(site_id, policy_id, domain):
@@ -374,14 +372,17 @@ def main():
                 policy_id = existing_info["policy_id"]
 
                 if existing_ip != target_ip:
-                    # IP address changed - update the record
+                    # IP address changed - update the record (delete + create)
                     logger.info(f"IP changed for {domain}: {existing_ip} -> {target_ip}")
-                    if unifi_update_record(site_id, policy_id, domain, target_ip):
-                        # Update our state with the new IP
-                        managed_records[domain] = {
-                            "policy_id": policy_id,
-                            "ip_address": target_ip
-                        }
+                    result = unifi_update_record(site_id, policy_id, domain, target_ip)
+                    if result:
+                        # Update our state with the new policy ID and IP
+                        new_policy_id = result.get('id')
+                        if new_policy_id:
+                            managed_records[domain] = {
+                                "policy_id": new_policy_id,
+                                "ip_address": target_ip
+                            }
                         updated_count += 1
                     else:
                         logger.error(f"Failed to update {domain}")
