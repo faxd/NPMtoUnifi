@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 NPM_BASE = os.getenv("NPM_BASE")
 NPM_USER = os.getenv("NPM_USER")
 NPM_PASS = os.getenv("NPM_PASS")
+NPM_IP = os.getenv("NPM_IP")  # The IP address where NPM is accessible (for DNS records)
 
 UNIFI_BASE = os.getenv("UNIFI_BASE")
 UNIFI_API_KEY = os.getenv("UNIFI_API_KEY")
@@ -34,6 +35,7 @@ required_vars = {
     "NPM_BASE": NPM_BASE,
     "NPM_USER": NPM_USER,
     "NPM_PASS": NPM_PASS,
+    "NPM_IP": NPM_IP,
     "UNIFI_BASE": UNIFI_BASE,
     "UNIFI_API_KEY": UNIFI_API_KEY,
     "UNIFI_SITE_ID": UNIFI_SITE_ID
@@ -293,8 +295,9 @@ def main():
         npm_token = npm_get_token()
         proxy_hosts = npm_get_hosts(npm_token)
 
-        # Build set of current NPM domains
-        npm_domains = {host["domain"]: host["forward_host"] for host in proxy_hosts}
+        # Build set of current NPM domains (all point to NPM_IP)
+        npm_domains = {host["domain"]: NPM_IP for host in proxy_hosts}
+        logger.info(f"All DNS records will point to NPM at: {NPM_IP}")
 
         # Get UniFi site ID (hardcoded or auto-discover)
         if UNIFI_SITE_ID:

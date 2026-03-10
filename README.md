@@ -157,6 +157,7 @@ Add line:
 | `NPM_BASE` | Nginx Proxy Manager URL | `https://npm.example.com` |
 | `NPM_USER` | NPM admin username | `admin@example.com` |
 | `NPM_PASS` | NPM admin password | `your_password` |
+| `NPM_IP` | NPM server IP address (where clients connect) | `192.168.1.100` |
 | `UNIFI_BASE` | UniFi Controller URL | `https://192.168.1.1` |
 | `UNIFI_API_KEY` | UniFi API key | `your_api_key` |
 | `UNIFI_SITE_ID` | UniFi Site UUID | `88f7af54-98f8-306a-...` |
@@ -182,11 +183,17 @@ sleep 300  # Change 300 to desired seconds (e.g., 600 = 10 minutes)
 ## How It Works
 
 1. **Fetches** all proxy hosts from NPM
-2. **Fetches** all existing DNS policies from UniFi (with pagination)
-3. **Compares** NPM records with UniFi records
-4. **Creates** missing DNS A records in UniFi
-5. **Deletes** DNS records that were removed from NPM (only script-managed records)
-6. **Tracks** managed records in `npm_unifi_state.json`
+2. **Creates DNS records** pointing to your NPM server IP (not backend services)
+3. **Fetches** all existing DNS policies from UniFi (with pagination)
+4. **Compares** NPM records with UniFi records
+5. **Creates** missing DNS A records in UniFi (all pointing to `NPM_IP`)
+6. **Updates** DNS records when NPM domains change
+7. **Deletes** DNS records that were removed from NPM (only script-managed records)
+8. **Tracks** managed records in `npm_unifi_state.json`
+
+**Traffic Flow**: Client → DNS lookup (gets NPM_IP) → NPM Server → Backend Service
+
+All DNS records point to your NPM server, which then proxies traffic to backend services.
 
 ## State File
 
