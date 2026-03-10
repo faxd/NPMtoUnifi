@@ -240,6 +240,30 @@ def unifi_create_record(site_id, domain, ip_address):
         logger.error(f"✗ Failed to create DNS policy {domain}: {r.status_code} - {r.text}")
         return None
 
+# --- UniFi: Update a DNS policy ---
+def unifi_update_record(site_id, policy_id, domain, ip_address):
+    payload = {
+        "type": "A_RECORD",
+        "enabled": True,
+        "domain": domain,
+        "ipv4Address": ip_address,
+        "ttlSeconds": 300  # 5 minutes TTL
+    }
+    logger.debug(f"Updating DNS policy with payload: {payload}")
+
+    url = f"{UNIFI_BASE}/proxy/network/integration/v1/sites/{site_id}/dns/policies/{policy_id}"
+    r = requests.patch(url, headers=unifi_get_headers(), json=payload, verify=False)
+
+    logger.debug(f"Update DNS policy response status: {r.status_code}")
+    logger.debug(f"Update DNS policy response body: {r.text}")
+
+    if r.status_code == 200:
+        logger.info(f"✓ Successfully updated DNS policy: {domain} -> {ip_address}")
+        return True
+    else:
+        logger.error(f"✗ Failed to update DNS policy {domain}: {r.status_code} - {r.text}")
+        return False
+
 # --- UniFi: Delete a DNS policy ---
 def unifi_delete_record(site_id, policy_id, domain):
     logger.debug(f"Deleting DNS policy: {domain} (ID: {policy_id})")
@@ -284,7 +308,7 @@ def main():
         # Get existing DNS policies from UniFi
         existing_dns = unifi_get_dns(site_id)
 
-        # Build a map of existing domains to their policy IDs
+        # Build a map of existing domains to their policy IDs and IP addresses
         existing_domains = {}
         for record in existing_dns:
             if not isinstance(record, dict):
@@ -294,9 +318,13 @@ def main():
             if record_type == 'A_RECORD':
                 domain = record.get('domain', '')
                 policy_id = record.get('id')
+                ip_address = record.get('ipv4Address', '')
                 if domain and policy_id:
-                    existing_domains[domain] = policy_id
-                    logger.debug(f"Mapped existing domain: {domain} -> {policy_id}")
+                    existing_domains[domain] = {
+                        "policy_id": policy_id,
+                        "ip_address": ip_address
+                    }
+                    logger.debug(f"Mapped existing domain: {domain} -> {ip_address} (ID: {policy_id})")
 
         logger.info(f"Total existing A records mapped: {len(existing_domains)}")
         logger.debug(f"Existing domains: {list(existing_domains.keys())}")
@@ -306,12 +334,14 @@ def main():
         logger.info("=" * 60)
 
         created_count = 0
+        updated_count = 0
         skipped_count = 0
         failed_count = 0
 
-        # Create new records for NPM domains
+        # Create new records or update existing ones for NPM domains
         for domain, target_ip in npm_domains.items():
             if domain not in existing_domains:
+                # Domain doesn't exist in UniFi - create it
                 logger.info(f"Creating DNS policy: {domain} -> {target_ip}")
                 result = unifi_create_record(site_id, domain, target_ip)
                 if result:
@@ -331,21 +361,41 @@ def main():
                     # Try to find this domain in UniFi again
                     if domain in existing_domains:
                         managed_records[domain] = {
-                            "policy_id": existing_domains[domain],
+                            "policy_id": existing_domains[domain]["policy_id"],
                             "ip_address": target_ip
                         }
                         skipped_count += 1
                     else:
                         failed_count += 1
             else:
-                logger.info(f"Already exists, skipping: {domain}")
-                # Make sure it's tracked in our state if it exists
-                if domain in existing_domains and domain not in managed_records:
-                    managed_records[domain] = {
-                        "policy_id": existing_domains[domain],
-                        "ip_address": target_ip
-                    }
-                skipped_count += 1
+                # Domain exists in UniFi - check if IP changed
+                existing_info = existing_domains[domain]
+                existing_ip = existing_info["ip_address"]
+                policy_id = existing_info["policy_id"]
+
+                if existing_ip != target_ip:
+                    # IP address changed - update the record
+                    logger.info(f"IP changed for {domain}: {existing_ip} -> {target_ip}")
+                    if unifi_update_record(site_id, policy_id, domain, target_ip):
+                        # Update our state with the new IP
+                        managed_records[domain] = {
+                            "policy_id": policy_id,
+                            "ip_address": target_ip
+                        }
+                        updated_count += 1
+                    else:
+                        logger.error(f"Failed to update {domain}")
+                        failed_count += 1
+                else:
+                    # IP is the same, no changes needed
+                    logger.info(f"No changes needed: {domain} -> {existing_ip}")
+                    # Make sure it's tracked in our state if it exists
+                    if domain not in managed_records:
+                        managed_records[domain] = {
+                            "policy_id": policy_id,
+                            "ip_address": target_ip
+                        }
+                    skipped_count += 1
 
         logger.info("=" * 60)
         logger.info("Cleaning up removed domains")
@@ -376,7 +426,8 @@ def main():
         logger.info("=" * 60)
         logger.info(f"Total NPM domains: {len(proxy_hosts)}")
         logger.info(f"Created: {created_count}")
-        logger.info(f"Skipped (already exist): {skipped_count}")
+        logger.info(f"Updated (IP changed): {updated_count}")
+        logger.info(f"Skipped (no changes): {skipped_count}")
         logger.info(f"Deleted (no longer in NPM): {deleted_count}")
         logger.info(f"Failed: {failed_count}")
         logger.info(f"Total managed records: {len(managed_records)}")
